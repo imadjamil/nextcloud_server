@@ -1,0 +1,162 @@
+version: '3.9'
+
+services:
+  db:
+    image: mariadb
+    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
+    restart: always
+    volumes:
+      - db:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:alpine
+    restart: always
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  app:
+    image: nextcloud:apache
+    restart: always
+    volumes:
+      - nextcloud:/var/www/html
+      - config:/var/www/html/config
+      - apps:/var/www/html/custom_apps
+      - data:/var/www/html/data
+      - dlna:/var/www/html/dlna
+    environment:
+      - VIRTUAL_HOST=${VIRTUAL_HOST}
+      - LETSENCRYPT_HOST=${LETSENCRYPT_HOST}
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}
+      - MYSQL_HOST=${MYSQL_HOST}
+      - REDIS_HOST=redis=${REDIS_HOST}
+    depends_on:
+      - db
+      - redis
+    networks:
+      - proxy-tier
+      - default
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  cron:
+    image: nextcloud:apache
+    restart: always
+    volumes:
+      - nextcloud:/var/www/html
+    entrypoint: /cron.sh
+    depends_on:
+      - db
+      - redis
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  proxy:
+    build: ./proxy
+    restart: always
+    ports:
+      - 80:80
+      - 443:443
+    labels:
+      com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy: "true"
+    volumes:
+      - certs:/etc/nginx/certs:ro
+      - vhost.d:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    networks:
+      - proxy-tier
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  letsencrypt-companion:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    restart: always
+    volumes:
+      - certs:/etc/nginx/certs
+      - vhost.d:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - proxy-tier
+    depends_on:
+      - proxy
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  dlna:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/dlna_media'
+  db:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/db'
+  nextcloud:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/nextcloud'
+  config:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/config'
+  apps:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/apps'
+  data:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/data'
+  certs:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/certs'
+  vhost.d:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/vhost.d'
+  html:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/html'
+
+networks:
+  proxy-tier:
