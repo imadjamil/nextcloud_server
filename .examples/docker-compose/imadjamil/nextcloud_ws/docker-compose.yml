@@ -4,7 +4,7 @@ services:
   db:
     image: mariadb
     command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
-    restart: always
+    #restart: always
     volumes:
       - db:/var/lib/mysql
     environment:
@@ -19,7 +19,7 @@ services:
 
   redis:
     image: redis:alpine
-    restart: always
+    #restart: always
     logging:
       options:
         max-size: "10m"
@@ -27,7 +27,10 @@ services:
 
   app:
     image: nextcloud:apache
-    restart: always
+    #restart: always
+    ports:
+      - 8080:80
+      - 8090:443
     volumes:
       - nextcloud:/var/www/html
       - config:/var/www/html/config
@@ -35,11 +38,13 @@ services:
       - data:/var/www/html/data
       - dlna:/var/www/html/dlna
     environment:
+      - PROXY_LOCATION=${NEXTCLOUD_PROXY_LOCATION}
       - VIRTUAL_HOST=${VIRTUAL_HOST}
+      - VIRTUAL_PORT= 8080,8090
       - LETSENCRYPT_HOST=${LETSENCRYPT_HOST}
       - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}
       - MYSQL_HOST=${MYSQL_HOST}
-      - REDIS_HOST=redis=${REDIS_HOST}
+      - REDIS_HOST=${REDIS_HOST}
     depends_on:
       - db
       - redis
@@ -53,7 +58,7 @@ services:
 
   cron:
     image: nextcloud:apache
-    restart: always
+    #restart: always
     volumes:
       - nextcloud:/var/www/html
     entrypoint: /cron.sh
@@ -67,12 +72,14 @@ services:
 
   proxy:
     build: ./proxy
-    restart: always
+    #restart: always
     ports:
       - 80:80
       - 443:443
     labels:
       com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy: "true"
+    environment:
+      DEFAULT_HOST: pihole.imadjamil.lan
     volumes:
       - certs:/etc/nginx/certs:ro
       - vhost.d:/etc/nginx/vhost.d
@@ -87,7 +94,7 @@ services:
 
   letsencrypt-companion:
     image: jrcs/letsencrypt-nginx-proxy-companion
-    restart: always
+    #restart: always
     volumes:
       - certs:/etc/nginx/certs
       - vhost.d:/etc/nginx/vhost.d
@@ -102,7 +109,71 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  pihole:
+    image: pihole/pihole:latest
+    ports:
+      - '53:53/tcp'
+      - '53:53/udp'
+      - '67:67/udp'
+      - '8053:80/tcp'
+      - '8054:443/tcp'
+    volumes:
+      - pihole:/etc/pihole/
+      - dnsmasq.d:/etc/dnsmasq.d/
+      # run `touch ./var-log/pihole.log` first unless you like errors
+      # - './var-log/pihole.log:/var/log/pihole.log'
+    # Recommended but not required (DHCP needs NET_ADMIN)
+    #   https://github.com/pi-hole/docker-pi-hole#note-on-capabilities
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - ServerIP=${SERVER_IP}
+      - "PROXY_LOCATION:pihole"
+      - "VIRTUAL_HOST:pihole.imadjamil.lan"
+      - "VIRTUAL_PORT:8053"
+    extra_hosts:
+      # Resolve to nothing domains (terminate connection)
+      - 'nw2master.bioware.com nwn2.master.gamespy.com:0.0.0.0'
+      # LAN hostnames for other docker containers using jwilder
+      - 'imadjamil.lan:192.168.1.6'
+      - 'ghost ghost.imadjamil.lan:192.168.1.6'
+      - 'pihole pihole.imadjamil.lan:192.168.1.6'
+      - 'app nextcloud.imadjamil.lan:192.168.1.6'
+      - 'emonpi emonpi.imadjamil.lan:192.168.1.207'
+    #restart: always
+
+  ghost:
+    image: fractalf/ghost
+    ports:
+      - '2368:2368/tcp'
+    volumes:
+      - ghost:/ghost-override
+    environment:
+      PROXY_LOCATION: ghost
+      VIRTUAL_HOST: ghost.imadjamil.lan
+      VIRTUAL_PORT: 2368
+      NODE_ENV: development
+    #restart: always
+
 volumes:
+  ghost:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/ghost'
+  dnsmasq.d:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/pihole/dnsmasq.d'
+  pihole:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/pihole/pihole'
   dlna:
     driver: local
     driver_opts:
