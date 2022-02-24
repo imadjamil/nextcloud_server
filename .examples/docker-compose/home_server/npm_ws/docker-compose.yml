@@ -1,0 +1,302 @@
+version: '3'
+
+services:
+  portainerapp:
+    image: portainer/portainer-ce
+    #restart: always
+    ports:
+      - 8033:8000
+      - 8034:9000
+    volumes:
+      - portainer:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  glancesapp:
+    build:
+      context: ./glances
+      dockerfile: Dockerfile
+    #restart: always
+    ports:
+      - "8063:61208"
+      # - "61209:61209"
+    environment:
+      # - GLANCES_OPT="-w"
+      GLANCES_OPT: "-w"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./glances/glances.conf:/glances/conf/glances.conf"
+    pid: "host"
+    #networks:
+      #- npm-tier
+      #- default
+
+  # pihole:
+  #   image: pihole/pihole:latest
+  #   ports:
+  #     - '53:53/tcp'
+  #     - '53:53/udp'
+  #     - '67:67/udp'
+  #     - '8053:80/tcp'
+  #     - '8054:443/tcp'
+  #   volumes:
+  #     - pihole:/etc/pihole/
+  #     - dnsmasq.d:/etc/dnsmasq.d/
+  #     - ./pihole/resolv.conf:/etc/resolv.conf
+  #     # run `touch ./var-log/pihole.log` first unless you like errors
+  #     # - './var-log/pihole.log:/var/log/pihole.log'
+  #   # Recommended but not required (DHCP needs NET_ADMIN)
+  #   #   https://github.com/pi-hole/docker-pi-hole#note-on-capabilities
+  #   cap_add:
+  #     - NET_ADMIN
+  #   #networks:
+  #     #- npm-tier
+  #     #- default
+
+  npmapp:
+    image: 'jc21/nginx-proxy-manager:latest'
+    #restart: always
+    ports:
+      - 80:80
+      - 81:81
+      - 443:443
+    environment:
+      DB_MYSQL_HOST: "npmdb"
+      DB_MYSQL_PORT: 3306
+      DB_MYSQL_USER: "npm"
+      DB_MYSQL_PASSWORD: "npm"
+      DB_MYSQL_NAME: "npm"
+    volumes:
+      - npmdata:/data
+      - npmletsencrypt:/etc/letsencrypt
+    logging:
+      options:
+        max-size: "10m"
+    #networks:
+      #- npm-tier
+      #- default
+
+  npmdb:
+    image: 'jc21/mariadb-aria:latest'
+    #restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: 'npm'
+      MYSQL_DATABASE: 'npm'
+      MYSQL_USER: 'npm'
+      MYSQL_PASSWORD: 'npm'
+    volumes:
+      - npmdb:/var/lib/mysql
+    logging:
+      options:
+        max-size: "10m"
+
+  ghostapp:
+    image: ghost:3-alpine
+    #restart: always
+    ports:
+      - 8010:2368
+      - 8011:2368
+    environment:
+      # see https://docs.ghost.org/docs/config#section-running-ghost-with-config-env-variables
+      database__client: mysql
+      database__connection__host: ${APPSDB_HOST}
+      database__connection__user: ${APPSDB_GHOST}
+      database__connection__password: ${APPSDB_GHOST_PASS}
+      database__connection__database: ${APPSDB_GHOST_DB}
+      # this url value is just an example, and is likely wrong for your environment!
+      url: http://www.imadjamil.eu
+      # contrary to the default mentioned in the linked documentation, this image defaults to NODE_ENV=production (so development mode needs to be explicitly specified if desired)
+      NODE_ENV: development
+    depends_on:
+      - appsdb
+    #networks:
+      #- npm-tier
+      #- default
+
+  silverstrikeapp:
+    image: simhnna/silverstrike
+    environment:
+      - ALLOWED_HOSTS='*'
+      - DATABASE_URL=postgres://{SILVERSTRIKEDB_USER}:{SILVERSTRIKEDB_PASS}@silverstrikedb/{SILVERSTRIKEDB_DB}
+      - SECRET_KEY={SILVERSTRIKEAPP_SECRET_KEY}
+    ports:
+      - 8100:8000
+    depends_on:
+      - silverstrikedb
+    links:
+      - silverstrikedb:database
+
+  silverstrikedb:
+    image: postgres:10.3
+    environment:
+      - POSTGRES_DB={SILVERSTRIKEDB_DB}
+      - POSTGRES_USER={SILVERSTRIKEDB_USER}
+      - POSTGRES_PASSWORD={SILVERSTRIKEDB_PASS}
+    volumes:
+      - silverstrikedb:/var/lib/postgresql/data
+
+  appsdb:
+    image: mariadb
+    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
+    #restart: always
+    volumes:
+      - appsdb:/var/lib/mysql
+      - ./mariadb/init:/docker-entrypoint-initdb.d
+    environment:
+      - MYSQL_ROOT_PASSWORD=${APPSDB_ROOT_PASS}
+      - MYSQL_PASSWORD=${APPSDB_NC_PASS}
+      - MYSQL_DATABASE=${APPSDB_NC_DB}
+      - MYSQL_USER=${APPSDB_NC}
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  adminerapp:
+    image: adminer
+    #restart: always
+    ports:
+      - 8070:8080
+
+  redis:
+    image: redis:alpine
+    #restart: always
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  ncapp:
+    image: nextcloud:apache
+    #restart: always
+    ports:
+      - 8090:80
+      - 8091:443
+    volumes:
+      - nextcloud:/var/www/html
+      - config:/var/www/html/config
+      - apps:/var/www/html/custom_apps
+      - data:/var/www/html/data
+      - dlna:/var/www/html/dlna
+      - ./nextcloud/upgrade.exclude:/upgrade.exclude
+    environment:
+      - VIRTUAL_HOST=${NC_VIRTUAL_HOST}
+      - VIRTUAL_PORT=80
+      - MYSQL_HOST=${APPSDB_HOST}
+      - MYSQL_USER=${APPSDB_NC}
+      - MYSQL_PASSWORD=${APPSDB_NC_PASS}
+      - MYSQL_DATABASE=${APPSDB_NC_DB}
+      - NEXTCLOUD_TRUSTED_DOMAINS=${NC_TRUSTED_DOMAINS}
+      - REDIS_HOST=${REDIS_HOST}
+    depends_on:
+      - appsdb
+      - redis
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+    #networks:
+      #- npm-tier
+      #- default
+
+  nccron:
+    image: nextcloud:apache
+    #restart: always
+    volumes:
+      - nextcloud:/var/www/html
+    entrypoint: /cron.sh
+    depends_on:
+      - appsdb
+      - redis
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  npmletsencrypt:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/npm/npmletsencrypt'
+  npmdata:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/npm/npmdata'
+  npmdb:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/npm/npmdb/data/mysql'
+  ghostapp:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/ghost/ghostapp'
+  appsdb:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/db'
+  dnsmasq.d:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/pihole/dnsmasq.d'
+  pihole:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/pihole/pihole'
+  nextcloud:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/nextcloud'
+  config:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/config'
+  apps:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/apps'
+  data:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/nextcloud/data'
+  dlna:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/dlna_media'
+  portainer:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/portainer'
+  silverstrikedb:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/silverstrike'
+
+      #networks:
+      #npm-tier:
