@@ -3,13 +3,38 @@ version: '3'
 services:
   portainerapp:
     image: portainer/portainer-ce
-    #restart: always
+    restart: unless-stopped
     ports:
       - 8033:8000
       - 8034:9000
     volumes:
       - portainer:/data
       - /var/run/docker.sock:/var/run/docker.sock
+  
+  mosquitto:
+    image: eclipse-mosquitto
+    restart: unless-stopped
+    volumes:
+     - mosquittovol:/mosquitto
+    ports:
+      - 1883:1883
+      - 9001:9001
+    network_mode: host
+
+  homeassistant:
+    container_name: homeassistant
+    image: "ghcr.io/home-assistant/home-assistant:stable"
+    depends_on:
+      - mosquitto
+    ports:
+      - 5000:5000
+      - 1935:1935
+    volumes:
+      - haconfig:/config
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    privileged: true
+    network_mode: host 
 
   glancesapp:
     build:
@@ -54,7 +79,7 @@ services:
 
   npmapp:
     image: 'jc21/nginx-proxy-manager:latest'
-    #restart: always
+    restart: unless-stopped
     ports:
       - 80:80
       - 81:81
@@ -77,7 +102,7 @@ services:
 
   npmdb:
     image: 'jc21/mariadb-aria:latest'
-    #restart: always
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: 'npm'
       MYSQL_DATABASE: 'npm'
@@ -137,7 +162,7 @@ services:
   appsdb:
     image: mariadb
     command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
-    #restart: always
+    restart: unless-stopped
     volumes:
       - appsdb:/var/lib/mysql
       - ./mariadb/init:/docker-entrypoint-initdb.d
@@ -159,7 +184,7 @@ services:
 
   redis:
     image: redis:alpine
-    #restart: always
+    restart: unless-stopped
     logging:
       options:
         max-size: "10m"
@@ -167,7 +192,7 @@ services:
 
   ncapp:
     image: nextcloud:apache
-    #restart: always
+    restart: unless-stopped
     ports:
       - 8090:80
       - 8091:443
@@ -201,7 +226,7 @@ services:
 
   nccron:
     image: nextcloud:apache
-    #restart: always
+    restart: unless-stopped
     volumes:
       - nextcloud:/var/www/html
     entrypoint: /cron.sh
@@ -298,6 +323,17 @@ volumes:
       type: 'none'
       o: 'bind'
       device: '/mnt/md0/silverstrike'
-
+  haconfig:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/haconfig'
+  mosquittovol:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/mosquitto'
       #networks:
       #npm-tier:
