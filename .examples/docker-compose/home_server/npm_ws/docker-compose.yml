@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   portainerapp:
     image: portainer/portainer-ce
@@ -10,6 +8,19 @@ services:
     volumes:
       - portainer:/data
       - /var/run/docker.sock:/var/run/docker.sock
+  
+  esphome:
+    container_name: esphome
+    image: ghcr.io/esphome/esphome
+    volumes:
+      - esphomevol:/config
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    environment:
+      - USERNAME=${ESPHOME_USERNAME}
+      - PASSWORD=${ESPHOME_PASS}
   
   mosquitto:
     image: eclipse-mosquitto
@@ -115,7 +126,7 @@ services:
         max-size: "10m"
 
   ghostapp:
-    image: ghost:3-alpine
+    image: ghost:latest
     #restart: always
     ports:
       - 8010:2368
@@ -191,7 +202,7 @@ services:
         max-file: "3"
 
   ncapp:
-    image: nextcloud:apache
+    image: nextcloud:30-apache
     restart: unless-stopped
     ports:
       - 8090:80
@@ -329,6 +340,12 @@ volumes:
       type: 'none'
       o: 'bind'
       device: '/mnt/md0/haconfig'
+  esphomevol:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '/mnt/md0/esphomeconfig'
   mosquittovol:
     driver: local
     driver_opts:
